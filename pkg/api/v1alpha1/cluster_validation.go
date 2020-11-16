@@ -19,6 +19,11 @@ func checkValues(c *Cluster) error {
 	}
 
 	for _, rack := range c.Spec.Datacenter.Racks {
+		// Check that rack is not scaled to 0 members
+		if rack.Members == 0 {
+			return errors.Errorf("cannot scale rack '%s' to 0 members", rack.Name)
+		}
+
 		// Check that no two racks have the same name
 		if rackNames.Has(rack.Name) {
 			return errors.Errorf("two racks have the same name: '%s'", rack.Name)
@@ -31,6 +36,20 @@ func checkValues(c *Cluster) error {
 			return errors.Errorf("set cpu, memory resource limits for rack %s", rack.Name)
 		}
 
+		// Check that requested values are not 0
+		requests := rack.Resources.Requests
+		if requests != nil {
+			if requests.Cpu() != nil && requests.Cpu().MilliValue() == 0 {
+				return errors.Errorf("requesting 0 cpus is invalid for rack %s", rack.Name)
+			}
+			if requests.Memory() != nil && requests.Memory().MilliValue() == 0 {
+				return errors.Errorf("requesting 0 memory is invalid for rack %s", rack.Name)
+			}
+			if requests.Storage() != nil && requests.Storage().MilliValue() == 0 {
+				return errors.Errorf("requesting 0 storage is invalid for rack %s", rack.Name)
+			}
+		}
+
 		// If the cluster has cpuset
 		if c.Spec.CpuSet {
 			cores := limits.Cpu().MilliValue()
@@ -41,7 +60,6 @@ func checkValues(c *Cluster) error {
 			}
 
 			// Requests == Limits and Requests must be set and equal for QOS class guaranteed
-			requests := rack.Resources.Requests
 			if requests != nil {
 				if requests.Cpu().MilliValue() != limits.Cpu().MilliValue() {
 					return errors.Errorf("when using cpuset, cpu requests must be the same as cpu limits in rack %s", rack.Name)

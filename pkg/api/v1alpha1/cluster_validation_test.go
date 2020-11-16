@@ -23,6 +23,30 @@ func TestCheckValues(t *testing.T) {
 	sameName := validCluster.DeepCopy()
 	sameName.Spec.Datacenter.Racks = append(sameName.Spec.Datacenter.Racks, sameName.Spec.Datacenter.Racks[0])
 
+	zeroReq := validCluster.DeepCopy()
+	zeroReq.Spec.Datacenter.Racks[0].Resources = corev1.ResourceRequirements{
+		Limits: map[corev1.ResourceName]resource.Quantity{
+			corev1.ResourceCPU:    resource.MustParse("2"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
+		},
+		Requests: map[corev1.ResourceName]resource.Quantity{
+			corev1.ResourceCPU:    resource.MustParse("0"),
+			corev1.ResourceMemory: resource.MustParse("0"),
+		},
+	}
+
+	zeroMemb := unit.NewSingleRackCluster(0)
+	zeroMemb.Spec.Datacenter.Racks[0].Resources = corev1.ResourceRequirements{
+		Limits: map[corev1.ResourceName]resource.Quantity{
+			corev1.ResourceCPU:    resource.MustParse("2"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
+		},
+		Requests: map[corev1.ResourceName]resource.Quantity{
+			corev1.ResourceCPU:    resource.MustParse("2"),
+			corev1.ResourceMemory: resource.MustParse("2Gi"),
+		},
+	}
+
 	tests := []struct {
 		name    string
 		obj     *v1alpha1.Cluster
@@ -36,6 +60,16 @@ func TestCheckValues(t *testing.T) {
 		{
 			name:    "two racks with same name",
 			obj:     sameName,
+			allowed: false,
+		},
+		{
+			name:	"rack with requests equal to 0",
+			obj:	zeroReq,
+			allowed: false,
+		},
+		{
+			name:	"rack with 0 members",
+			obj:	zeroMemb,
 			allowed: false,
 		},
 	}
