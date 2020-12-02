@@ -1,14 +1,67 @@
 package v1alpha1
 
 import (
-	"reflect"
-
 	"github.com/blang/semver"
 	"github.com/pkg/errors"
+	prometheusApi "github.com/prometheus/client_golang/api"
+	"github.com/scylladb/go-log"
+	"os"
+	"time"
+
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
+
+	//"github.com/scylladb/scylla-operator/pkg/auth"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	//"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"reflect"
+	//"sigs.k8s.io/controller-runtime/pkg/client"
+	//"sigs.k8s.io/controller-runtime/pkg/client/config"
+
+	"context"
 )
 
+var (
+	ctx    context.Context
+	atom   zap.AtomicLevel
+	logger log.Logger
+	_      error
+)
+
+func init() {
+	ctx = log.WithNewTraceID(context.Background())
+	atom = zap.NewAtomicLevelAt(zapcore.InfoLevel)
+	logger, _ = log.NewProduction(log.Config{
+		Level: atom,
+	})
+}
+
 func checkValues(c *Cluster) error {
+
+	// creating client for Prometheus API
+	prometheusClient, err := prometheusApi.NewClient(prometheusApi.Config{
+		Address: "http://scylla-prom-prometheus-server.monitoring.svc.cluster.local",
+	})
+
+	if err != nil {
+		logger.Error(ctx, "Error creating client", "error", err)
+		os.Exit(1)
+	}
+
+	v1Api := v1.NewAPI(prometheusClient)
+
+	result, warnings, err := v1Api.Query(ctx, "up{app=\"scylla\"}", time.Now())
+	if err != nil {
+		logger.Error(ctx, "Error querying Prometheus", "error", err)
+		return nil
+	}
+	if len(warnings) > 0 {
+		logger.Error(ctx, "Warnings: ", "warnings", warnings)
+	}
+	logger.Info(ctx, "Result: ", "result", result)
+
 	rackNames := sets.NewString()
 
 	if len(c.Spec.ScyllaArgs) > 0 {

@@ -21,6 +21,7 @@ require (
 	github.com/onsi/ginkgo v1.12.1
 	github.com/onsi/gomega v1.10.1
 	github.com/pkg/errors v0.9.1
+	github.com/prometheus/client_golang v1.0.0
 	github.com/scylladb/go-log v0.0.4
 	github.com/scylladb/go-set v1.0.2
 	github.com/spf13/cobra v0.0.5
