@@ -3,24 +3,27 @@ package v1alpha1
 import (
 	"github.com/blang/semver"
 	"github.com/pkg/errors"
-	prometheusApi "github.com/prometheus/client_golang/api"
 	"github.com/scylladb/go-log"
+	"github.com/scylladb/scylla-operator/pkg/auth"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"os"
 	"time"
 
-	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
-
-	//"github.com/scylladb/scylla-operator/pkg/auth"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
-	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	//"k8s.io/apimachinery/pkg/runtime"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"net/http"
 	"reflect"
-	//"sigs.k8s.io/controller-runtime/pkg/client"
-	//"sigs.k8s.io/controller-runtime/pkg/client/config"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"context"
+	"github.com/scylladb/scylla-operator/pkg/scyllaclient"
+	k8sClient "k8s.io/client-go/kubernetes"
+
+	prometheusApi "github.com/prometheus/client_golang/api"
+	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 )
 
 var (
@@ -61,6 +64,93 @@ func checkValues(c *Cluster) error {
 		logger.Error(ctx, "Warnings: ", "warnings", warnings)
 	}
 	logger.Info(ctx, "Result: ", "result", result)
+
+	// $ k describe ScyllaCluster
+	// Spec:
+	//  ...
+	//  Datacenter:
+	//    ...
+	//    Racks:
+	//      ...
+	//      Scylla Agent Config:  scylla-agent-config    <<-- THIS
+	scheme := runtime.NewScheme()
+	_ = AddToScheme(scheme)
+
+	clientGo, err := client.New(config.GetConfigOrDie(), client.Options{Scheme: scheme})
+	if err != nil {
+		logger.Error(ctx, "failed to create a client")
+	}
+	scyllaCluster := &Cluster{}
+	err = clientGo.Get(ctx, client.ObjectKey{
+		Namespace: "scylla",
+		Name:      "simple-cluster"}, scyllaCluster)
+	if err != nil {
+		logger.Error(ctx, "failed to get cluster 'simple-cluster' in namespace 'scylla'", "error", err)
+	}
+	logger.Info(ctx, "got", "scyllaCluster", scyllaCluster)
+	scyllaAgentConfig := scyllaCluster.Spec.Datacenter.Racks[0].ScyllaAgentConfig
+
+	// $ k describe secrets <Scylla Agent Config>
+	// Name:         default-token-72fwl
+	//Namespace:    scylla
+	//Labels:       <none>
+	//Annotations:  kubernetes.io/service-account.name: default
+	//              kubernetes.io/service-account.uid: 8cbd9d85-2ac9-4f9b-99a9-146af28ac28b
+	//Type:  kubernetes.io/service-account-token
+	//
+	//Data
+	//ca.crt:     1111 bytes
+	//namespace:  6 bytes
+	//token:      eyJhbGc..abcd							 <<-- THIS
+
+	//config, err := rest.InClusterConfig()
+	config := config.GetConfigOrDie()
+	clientset, err := k8sClient.NewForConfig(config)
+	if err != nil {
+		panic(err.Error())
+	}
+	secrets := clientset.CoreV1().Secrets("scylla")
+	s, err := secrets.Get(context.TODO(), scyllaAgentConfig, metav1.GetOptions{})
+	var bearerToken string
+	if err != nil {
+		bearerToken = ""
+	} else {
+		bearerToken = string(s.Data["token"])
+	}
+	logger.Info(ctx, "secrets got", "secret", bearerToken)
+
+	// polaczyc sie z scylla-manager-agent na localhost:10001 z bearer token
+	// tam składać zapytania
+	// /storage_service/load (to jest w B, KB?)
+
+	sc, err := scyllaclient.NewClient(scyllaclient.DefaultConfig(), logger)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	transport := config.Transport
+	transport = auth.AddToken(transport, bearerToken)
+	httpClient := &http.Client{Transport: transport}
+	// to debug
+	logger.Info(ctx, "ping", "sc", sc, "err", err, "httpClient", httpClient)
+
+	sc.AddBearerToken(bearerToken)
+	load, err := sc.StorageServiceLoadGetWithParamsFromHTTPClient(ctx)
+	logger.Info(ctx, "getLoad", "load", load, "error", err)
+
+	// pojemność dysku
+	// $ kubectl describe sts
+	// Volume Claims:
+	// ...
+	//  Capacity:      5Gi              				   <<-- THIS
+
+	/*for _, rack := range c.Spec.Datacenter.Racks {
+
+		pods := clientset.CoreV1().Pods("scylla")
+		p, err := pods.Get(context.TODO(), rack.Name, metav1.GetOptions{})
+		capacity := p.Spec.Volumes
+		logger.Info(ctx, "secrets got", "secret", bearerToken)
+	}*/
 
 	rackNames := sets.NewString()
 

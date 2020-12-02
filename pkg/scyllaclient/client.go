@@ -246,3 +246,13 @@ func fixContentType(next http.RoundTripper) http.RoundTripper {
 		return next.RoundTrip(req)
 	})
 }
+
+// TODO: remove when client ported to scylla
+func (c *Client) StorageServiceLoadGetWithParamsFromHTTPClient(ctx context.Context) (*scyllaOperations.StorageServiceLoadGetOK, error) {
+	return c.scyllaOps.StorageServiceLoadGet(&scyllaOperations.StorageServiceLoadGetParams{Context: ctx})
+}
+
+// TODO: remove when client ported to scylla
+func (c *Client) AddBearerToken(bearerToken string) {
+	c.transport = auth.AddToken(c.transport, bearerToken)
+}
